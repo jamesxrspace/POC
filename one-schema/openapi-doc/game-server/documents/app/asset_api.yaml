@@ -23,8 +23,8 @@ paths:
       security:
         - BearerAuth: [ ]
       parameters:
-        - $ref: '../Common/common.yaml#/components/schemas/PaginationRequest/Offset'
-        - $ref: '../Common/common.yaml#/components/schemas/PaginationRequest/Size'
+        - $ref: '../common/common.yaml#/components/schemas/PaginationRequest/Offset'
+        - $ref: '../common/common.yaml#/components/schemas/PaginationRequest/Size'
         - name: type
           in: path
           description: asset type
@@ -231,7 +231,7 @@ components:
 
     AssetListResponse:
       allOf:
-        - $ref: '../Common/common.yaml#/components/schemas/BaseResponse'
+        - $ref: '../common/common.yaml#/components/schemas/BaseResponse'
         - type: object
           properties:
             data:

@@ -27,7 +27,11 @@ jobs:
     steps:
     - uses: schemathesis/action@v1
       with:
-        schema: "https://example.schemathesis.io/openapi.json"
+        schema: "./one-schema/json_schema/ErrorCode.schema"
+        base-url: 'http://json-schema.org/draft-04/schema#'
+    - name: Shell Scripts
+      run: |
+        pre-commit run --all-files
   Build-push-from-ECS:
     if: github.event.inputs.POC_ENV == 'ecs'
     name: Building at ECS

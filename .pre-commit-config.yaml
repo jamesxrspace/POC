@@ -1,0 +1,6 @@
+repos:
+-   repo: https://github.com/python-openapi/openapi-spec-validator
+    rev: master # The version to use or 'master' for latest
+    hooks:
+    -   id: openapi-spec-validator
+        exclude: .github/
