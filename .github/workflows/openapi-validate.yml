@@ -28,7 +28,7 @@ jobs:
     - uses: schemathesis/action@v1
       with:
         schema: "https://example.schemathesis.io/openapi.json"
- Build-push-from-ECS:
+  Build-push-from-ECS:
     if: github.event.inputs.POC_ENV == 'ecs'
     name: Building at ECS
     environment: building_variables
