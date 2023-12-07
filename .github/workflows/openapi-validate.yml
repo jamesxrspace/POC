@@ -20,7 +20,7 @@ on:
 jobs:
   schemathesis-Testting:
     if: github.event.inputs.POC_ENV == 'schemathesis'
-    name: OpenAPI Linting Testting
+    name: OpenAPI with schemathests validation
     environment: building_variables
     runs-on: [poc]
     steps:
