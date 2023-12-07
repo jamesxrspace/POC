@@ -3,4 +3,4 @@ repos:
     rev: master # The version to use or 'master' for latest
     hooks:
     -   id: openapi-spec-validator
-        exclude: .github/
+        exclude: .github/|one-schema/openapi-doc/game-server/documents/common/
