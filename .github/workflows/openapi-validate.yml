@@ -1,14 +1,14 @@
-name: official website v2
+name: openAPI linting test
 on:
   workflow_dispatch:
     inputs:
-      BUILD_ENV:
+      POC_ENV:
         description: 'The target build environment'
         required: true
         type: choice
-        default: ec2
+        default: openAPI
         options:
-          - ec2
+          - openAPI
           - ecs
           - prod
   workflow_call:
@@ -19,57 +19,17 @@ on:
         type: string
 
 jobs:
-  Build-push-from-EC2:
-    if: github.event.inputs.BUILD_ENV == 'ec2'
-    name: Building at EC2
+  POC-OpenAPI-linting-Testting:
+    if: github.event.inputs.POC_ENV == 'openAPI'
+    name: OpenAPI Linting Testting
     environment: building_variables
-    runs-on: [EC2-official-website-Linux]
+    runs-on: [poc]
     steps:
-    - uses: actions/checkout@v3
+      - uses: schemathesis/action@v1
       with:
-        ref: ${{ inputs.TARGET_BRANCH || '' }}
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ vars.AWS_REGION }}
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
-      with:
-        mask-password: true
-    - name: Build, tag, and push image to Amazon ECR
-      id: build-image
-      env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        ECR_REPOSITORY: "webportal-v2"
-        IMAGE_TAG: ${{ github.sha }}
-        DOCKER_BUILDKIT: True
-      run: |
-        # Build a docker container and
-        # push it to ECR so that it can
-        # be deployed to EC2.
-        pre-commit run --all-files
-        pushd deployment/EC2 || exit 1
-        sops -d -i hosts
-        ansible-lint
-        popd
-        if [[ -z "$(docker inspect $(docker images -q)|grep $IMAGE_TAG)" ]];then
-          if [[ -n "$(docker images -f label=app=official-website-v2 -q)" ]];then
-            docker rmi $(docker images -f label="app=official-website-v2" -q)
-          fi
-          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" . --build-arg locales="tw,us" --build-arg defaultLocale="us" -f deployment/EC2/Dockerfile
-          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-        fi
-        {
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-          echo "awsregistry=$ECR_REGISTRY"
-          echo "awsaccesskey=${{ secrets.AWS_ACCESS_KEY_ID }}"
-          echo "awssecretkey=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
-        } >> deployment/EC2/hosts
-  Build-push-from-ECS:
-    if: github.event.inputs.BUILD_ENV == 'ecs'
+        schema: "https://example.schemathesis.io/openapi.json"
+ Build-push-from-ECS:
+    if: github.event.inputs.POC_ENV == 'ecs'
     name: Building at ECS
     environment: building_variables
     runs-on: [ECS-official-website-Linux]
@@ -110,7 +70,7 @@ jobs:
         fi
 
   Deploy_to_EC2:
-    if: github.event.inputs.BUILD_ENV == 'ec2'
+    if: github.event.inputs.POC_ENV == 'ec2'
     environment: deploy_variables_for_dev
     needs: Build-push-from-EC2
     runs-on: [EC2-official-website-Linux]
@@ -143,7 +103,7 @@ jobs:
         chmod 400 ec2.pem
         ansible-playbook -i hosts provision.yml
   Deploy_to_ECS:
-    if: github.event.inputs.BUILD_ENV == 'ecs'
+    if: github.event.inputs.POC_ENV == 'ecs'
     environment: deploy_variables_for_dev
     needs: Build-push-from-ECS
     runs-on: [ECS-official-website-Linux]
