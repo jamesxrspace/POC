@@ -6,11 +6,10 @@ on:
         description: 'The target build environment'
         required: true
         type: choice
-        default: openAPI
+        default: schemathesis
         options:
-          - openAPI
-          - ecs
-          - prod
+          - schemathesis
+          - openapi-spec-validator
   workflow_call:
     inputs:
       TARGET_BRANCH:
@@ -19,8 +18,8 @@ on:
         type: string
 
 jobs:
-  API-Testting:
-    if: github.event.inputs.POC_ENV == 'openAPI'
+  schemathesis-Testting:
+    if: github.event.inputs.POC_ENV == 'schemathesis'
     name: OpenAPI Linting Testting
     environment: building_variables
     runs-on: [poc]
@@ -29,70 +28,12 @@ jobs:
       with:
         schema: "./one-schema/json_schema/ErrorCode.schema"
         base-url: 'http://json-schema.org/draft-04/schema#'
-    - name: Shell Scripts
-      run: |
-        pre-commit run --all-files
-  Build-push-from-ECS:
-    if: github.event.inputs.POC_ENV == 'ecs'
+  openapi-spec-validator:
+    if: github.event.inputs.POC_ENV == 'openapi-spec-validator'
     name: Building at ECS
     environment: building_variables
-    runs-on: [ECS-official-website-Linux]
-    outputs:
-      IMAGE: ${{ steps.cn-image.outputs.image }}
-    steps:
-    - uses: actions/checkout@v3
-      with:
-        ref: ${{ inputs.TARGET_BRANCH || '' }}
-        ssh-key: ${{ secrets.ECS_SSH_PRIVATE_KEY }}
-    - name: Login to AlibabaCloud ACR Build, tag, and push image to Aliyun ACR
-      id: cn-image
-      env:
-        IMAGE_TAG: ${{ github.sha }}
-        ACR_REGISTRY: "registry.cn-shenzhen.aliyuncs.com/xrspace-server"
-        ACR_REPOSITORY: "webportal-v2"
-        DOCKER_BUILDKIT: True
-      shell: bash
-      run: |
-        # Build a docker container and
-        # push it to ACR so that it can
-        # be deployed to ECS.
-        ######## ACR push time is too long and temporarily blocked ######################
-        # docker login --username=${{ secrets.ACR_USERNAME }} -p ${{ secrets.ACR_PASSWORD }} $ACR_REGISTRY
-        # docker push "$ACR_REGISTRY/$ACR_REPOSITORY:$IMAGE_TAG" 
-        go env -w GOPROXY=https://goproxy.cn
-        pre-commit run --all-files
-        echo "image='$ACR_REGISTRY/$ACR_REPOSITORY:$IMAGE_TAG'" >> $GITHUB_OUTPUT
-
-        if [[ -z "$(docker inspect $(docker images -q)|grep $IMAGE_TAG)" ]];then
-          pushd deployment/ECS || exit 1
-            if [[ -n "$(docker images -f label=app=official-website-v2 -q)" ]];then
-              docker-compose down
-              docker rmi $(docker images -f label="app=official-website-v2" -q)
-            fi
-          popd
-          docker build -t "$ACR_REGISTRY/$ACR_REPOSITORY:$IMAGE_TAG" . --build-arg locales="tw,us" --build-arg defaultLocale="us" -f deployment/ECS/Dockerfile
-        fi
-
-  API_nest_testting:
-    if: github.event.inputs.POC_ENV == 'poc'
-    environment: deploy_variables_for_dev
-    needs: API-Testting
     runs-on: [poc]
     steps:
-    - name: Shell Scripts
+    - name: pre-commit openapi-spec-validator
       run: |
-        echo "good"
-  Deploy_to_ECS:
-    if: github.event.inputs.POC_ENV == 'ecs'
-    environment: deploy_variables_for_dev
-    needs: Build-push-from-ECS
-    runs-on: [ECS-official-website-Linux]
-    steps:
-    - name: Deploy to ECS
-      shell: bash
-      run: |
-        echo "nuxt_public_api_base='NUXT_PUBLIC_API_BASE: https://webportal-cms-dev.xrspace.com.cn/api'"> ~/office-website-v2/env.yaml
-        pushd deployment/ECS/ || exit 1
-        export IMAGE='${{ needs.Build-push-from-ECS.outputs.IMAGE }}'
-        docker-compose down
-        docker-compose up -d
+        pre-commit run --all-files
