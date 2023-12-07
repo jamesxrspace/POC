@@ -1,4 +1,4 @@
-name: openAPI linting test
+name: OpenAPI json/yaml validation
 on:
   workflow_dispatch:
     inputs:
@@ -6,7 +6,7 @@ on:
         description: 'The target build environment'
         required: true
         type: choice
-        default: schemathesis
+        default: openapi-spec-validator
         options:
           - schemathesis
           - openapi-spec-validator
