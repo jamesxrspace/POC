@@ -25,7 +25,7 @@ jobs:
     environment: building_variables
     runs-on: [poc]
     steps:
-      - uses: schemathesis/action@v1
+    - uses: schemathesis/action@v1
       with:
         schema: "https://example.schemathesis.io/openapi.json"
  Build-push-from-ECS:
