@@ -1,0 +1,158 @@
+name: official website v2
+on:
+  workflow_dispatch:
+    inputs:
+      BUILD_ENV:
+        description: 'The target build environment'
+        required: true
+        type: choice
+        default: ec2
+        options:
+          - ec2
+          - ecs
+          - prod
+  workflow_call:
+    inputs:
+      TARGET_BRANCH:
+        description: "The target branch"
+        default: ""
+        type: string
+
+jobs:
+  Build-push-from-EC2:
+    if: github.event.inputs.BUILD_ENV == 'ec2'
+    name: Building at EC2
+    environment: building_variables
+    runs-on: [EC2-official-website-Linux]
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        ref: ${{ inputs.TARGET_BRANCH || '' }}
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ vars.AWS_REGION }}
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+      with:
+        mask-password: true
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: "webportal-v2"
+        IMAGE_TAG: ${{ github.sha }}
+        DOCKER_BUILDKIT: True
+      run: |
+        # Build a docker container and
+        # push it to ECR so that it can
+        # be deployed to EC2.
+        pre-commit run --all-files
+        pushd deployment/EC2 || exit 1
+        sops -d -i hosts
+        ansible-lint
+        popd
+        if [[ -z "$(docker inspect $(docker images -q)|grep $IMAGE_TAG)" ]];then
+          if [[ -n "$(docker images -f label=app=official-website-v2 -q)" ]];then
+            docker rmi $(docker images -f label="app=official-website-v2" -q)
+          fi
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" . --build-arg locales="tw,us" --build-arg defaultLocale="us" -f deployment/EC2/Dockerfile
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+        fi
+        {
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "awsregistry=$ECR_REGISTRY"
+          echo "awsaccesskey=${{ secrets.AWS_ACCESS_KEY_ID }}"
+          echo "awssecretkey=${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+        } >> deployment/EC2/hosts
+  Build-push-from-ECS:
+    if: github.event.inputs.BUILD_ENV == 'ecs'
+    name: Building at ECS
+    environment: building_variables
+    runs-on: [ECS-official-website-Linux]
+    outputs:
+      IMAGE: ${{ steps.cn-image.outputs.image }}
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        ref: ${{ inputs.TARGET_BRANCH || '' }}
+        ssh-key: ${{ secrets.ECS_SSH_PRIVATE_KEY }}
+    - name: Login to AlibabaCloud ACR Build, tag, and push image to Aliyun ACR
+      id: cn-image
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+        ACR_REGISTRY: "registry.cn-shenzhen.aliyuncs.com/xrspace-server"
+        ACR_REPOSITORY: "webportal-v2"
+        DOCKER_BUILDKIT: True
+      shell: bash
+      run: |
+        # Build a docker container and
+        # push it to ACR so that it can
+        # be deployed to ECS.
+        ######## ACR push time is too long and temporarily blocked ######################
+        # docker login --username=${{ secrets.ACR_USERNAME }} -p ${{ secrets.ACR_PASSWORD }} $ACR_REGISTRY
+        # docker push "$ACR_REGISTRY/$ACR_REPOSITORY:$IMAGE_TAG" 
+        go env -w GOPROXY=https://goproxy.cn
+        pre-commit run --all-files
+        echo "image='$ACR_REGISTRY/$ACR_REPOSITORY:$IMAGE_TAG'" >> $GITHUB_OUTPUT
+
+        if [[ -z "$(docker inspect $(docker images -q)|grep $IMAGE_TAG)" ]];then
+          pushd deployment/ECS || exit 1
+            if [[ -n "$(docker images -f label=app=official-website-v2 -q)" ]];then
+              docker-compose down
+              docker rmi $(docker images -f label="app=official-website-v2" -q)
+            fi
+          popd
+          docker build -t "$ACR_REGISTRY/$ACR_REPOSITORY:$IMAGE_TAG" . --build-arg locales="tw,us" --build-arg defaultLocale="us" -f deployment/ECS/Dockerfile
+        fi
+
+  Deploy_to_EC2:
+    if: github.event.inputs.BUILD_ENV == 'ec2'
+    environment: deploy_variables_for_dev
+    needs: Build-push-from-EC2
+    runs-on: [EC2-official-website-Linux]
+    steps:
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: '${{ secrets.AWS_ACCESS_KEY_ID }}'
+        aws-secret-access-key: '${{ secrets.AWS_SECRET_ACCESS_KEY }}'
+        aws-region: ap-southeast-1
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_wrapper: false
+    - name: Terraform Apply
+      run: |
+        pushd infra/EC2/ || exit 1
+        terraform init
+        terraform validate
+        terraform plan
+        terraform apply -auto-approve
+        popd
+        pre-commit run --all-files
+        ansible-lint deployment
+    - name: Ansible Deploy to EC2
+      shell: bash
+      run: |
+        cd deployment/EC2/ || exit 1
+        echo '${{ secrets.PEM }}' > ec2.pem 
+        chmod 400 ec2.pem
+        ansible-playbook -i hosts provision.yml
+  Deploy_to_ECS:
+    if: github.event.inputs.BUILD_ENV == 'ecs'
+    environment: deploy_variables_for_dev
+    needs: Build-push-from-ECS
+    runs-on: [ECS-official-website-Linux]
+    steps:
+    - name: Deploy to ECS
+      shell: bash
+      run: |
+        echo "nuxt_public_api_base='NUXT_PUBLIC_API_BASE: https://webportal-cms-dev.xrspace.com.cn/api'"> ~/office-website-v2/env.yaml
+        pushd deployment/ECS/ || exit 1
+        export IMAGE='${{ needs.Build-push-from-ECS.outputs.IMAGE }}'
+        docker-compose down
+        docker-compose up -d
